@@ -19,6 +19,7 @@ from abc import abstractmethod
 
 
 class LM(abc.ABC):
+
     def __init__(self):
         self.cache_hook = CacheHook(None)
 
@@ -119,6 +120,7 @@ class LM(abc.ABC):
 
 
 class BaseLM(LM):
+
     @property
     @abstractmethod
     def eot_token_id(self):
@@ -181,7 +183,8 @@ class BaseLM(LM):
 
             continuation_enc = self.tok_encode(continuation)
 
-            new_reqs.append(((context, continuation), context_enc, continuation_enc))
+            new_reqs.append(
+                ((context, continuation), context_enc, continuation_enc))
 
         return self._loglikelihood_tokens(new_reqs)
 
@@ -192,17 +195,19 @@ class BaseLM(LM):
         adaptive_batch_size = None
         if self.batch_size == "auto":
             # using rolling window with maximum context
-            print("Passed argument batch_size = auto. Detecting largest batch size")
+            print(
+                "Passed argument batch_size = auto. Detecting largest batch size"
+            )
 
             @find_executable_batch_size(
                 starting_batch_size=512
             )  # if OOM, then halves batch_size and tries again
             def forward_batch(batch_size):
-                test_batch = torch.ones(
-                    (batch_size, self.max_length), device=self.device
-                ).long()
+                test_batch = torch.ones((batch_size, self.max_length),
+                                        device=self.device).long()
                 for _ in range(5):
-                    _ = F.log_softmax(self._model_call(test_batch), dim=-1).cpu()
+                    _ = F.log_softmax(self._model_call(test_batch),
+                                      dim=-1).cpu()
                 return batch_size
 
             batch_size = forward_batch()
@@ -210,7 +215,7 @@ class BaseLM(LM):
             adaptive_batch_size = batch_size
 
         loglikelihoods = []
-        for (string,) in tqdm(requests):
+        for (string, ) in tqdm(requests):
             rolling_token_windows = list(
                 map(
                     utils.make_disjoint_window,
@@ -220,10 +225,10 @@ class BaseLM(LM):
                         max_seq_len=self.max_length,
                         context_len=1,
                     ),
-                )
-            )
+                ))
 
-            rolling_token_windows = [(None,) + x for x in rolling_token_windows]
+            rolling_token_windows = [(None, ) + x
+                                     for x in rolling_token_windows]
 
             # TODO: extract out this call so it only gets called once and also somehow figure out partial caching for
             # that
@@ -241,7 +246,10 @@ class BaseLM(LM):
 
         return loglikelihoods
 
-    def _loglikelihood_tokens(self, requests, disable_tqdm=False, override_bs=None):
+    def _loglikelihood_tokens(self,
+                              requests,
+                              disable_tqdm=False,
+                              override_bs=None):
         # TODO: implement some kind of efficient-request-middleware that lumps together requests with the same context
         res = []
 
@@ -262,16 +270,24 @@ class BaseLM(LM):
         # pull longest context sample from request
         if len(re_ord.get_reordered()) > 0:
             _, context_enc, continuation_enc = re_ord.get_reordered()[0]
-            max_context = len((context_enc + continuation_enc)[-(self.max_length + 1) :][:-1])
+            max_context = len(
+                (context_enc + continuation_enc)[-(self.max_length + 1):][:-1])
             if (self.batch_size == 'auto'):
-                
+
                 if override_bs is None:
-                    print('Passed argument batch_size = auto. Detecting largest batch size')
-                    @find_executable_batch_size(starting_batch_size=512) # if OOM, then halves batch_size and tries again
+                    print(
+                        'Passed argument batch_size = auto. Detecting largest batch size'
+                    )
+
+                    @find_executable_batch_size(
+                        starting_batch_size=512
+                    )  # if OOM, then halves batch_size and tries again
                     def forward_batch(batch_size):
-                        test_batch = torch.ones((batch_size, max_context), device=self.device).long()
+                        test_batch = torch.ones((batch_size, max_context),
+                                                device=self.device).long()
                         for _ in range(5):
-                            out = F.log_softmax(self._model_call(test_batch), dim = -1).cpu()
+                            out = F.log_softmax(self._model_call(test_batch),
+                                                dim=-1).cpu()
                         return batch_size
 
                     batch_size = forward_batch()
@@ -284,12 +300,14 @@ class BaseLM(LM):
             adaptive_batch_size = 0 if override_bs is None else override_bs
 
         for chunk in utils.chunks(
-            tqdm(re_ord.get_reordered(), disable=disable_tqdm),
-            self.batch_size if self.batch_size != "auto" else adaptive_batch_size,
+                tqdm(re_ord.get_reordered(), disable=disable_tqdm),
+                self.batch_size
+                if self.batch_size != "auto" else adaptive_batch_size,
         ):
             inps = []
             cont_toks_list = []
             inplens = []
+            contps = []
 
             padding_length = None
 
@@ -312,67 +330,90 @@ class BaseLM(LM):
 
                 # when too long to fit in context, truncate from the left
                 inp = torch.tensor(
-                    (context_enc + continuation_enc)[-(self.max_length + 1) :][:-1],
+                    (context_enc +
+                     continuation_enc)[-(self.max_length + 1):][:-1],
                     dtype=torch.long,
-                ).to(self.device)
-                (inplen,) = inp.shape
+                )
+                contp = torch.tensor(
+                    (context_enc[-1:] +
+                     continuation_enc)[-(self.max_length + 1):][:-1],
+                    dtype=torch.long,
+                )
+                (inplen, ) = inp.shape
 
                 cont = continuation_enc
 
                 # since in _collate we make sure length is descending, the longest is always the first one.
-                padding_length = (
-                    padding_length if padding_length is not None else inplen
-                )
+                padding_length = (padding_length
+                                  if padding_length is not None else inplen)
 
                 # pad length from seq to padding_length
                 inp = torch.cat(
                     [
                         inp,  # [seq]
-                        torch.zeros(padding_length - inplen, dtype=torch.long).to(
-                            inp.device
-                        ),  # [padding_length - seq]
+                        torch.zeros(padding_length - inplen,
+                                    dtype=torch.long).to(
+                                        inp.device),  # [padding_length - seq]
+                    ],
+                    dim=0,
+                )
+                contp = torch.cat(
+                    [
+                        contp,  # [seq]
+                        torch.zeros(padding_length - len(cont),
+                                    dtype=torch.long).to(
+                                        inp.device),  # [padding_length - seq]
                     ],
                     dim=0,
                 )
 
                 inps.append(inp.unsqueeze(0))  # [1, padding_length]
+                contps.append(contp.unsqueeze(0))
                 cont_toks_list.append(cont)
                 inplens.append(inplen)
 
+            batched_contps = torch.cat(contps, dim=0)  # [batch, seq]
             batched_inps = torch.cat(inps, dim=0)  # [batch, padding_length
-            multi_logits = F.log_softmax(
-                self._model_call(batched_inps), dim=-1
-            ).cpu()  # [batch, padding_length, vocab]
 
-            for (cache_key, _, _), logits, inp, inplen, cont_toks in zip(
-                chunk, multi_logits, inps, inplens, cont_toks_list
-            ):
+            multi_logits = F.log_softmax(
+                self._model_call(batched_inps.to(self.device)).cpu(),
+                dim=-1)  # [batch, padding_length, vocab]
+            uncond_multi_logits = F.log_softmax(
+                self._model_call(batched_contps.to(self.device)).cpu(),
+                dim=-1)  # [batch, padding_length, vocab]
+
+            for (cache_key, _,
+                 _), logits, uncond_logits, inp, inplen, cont_toks in zip(
+                     chunk, multi_logits, uncond_multi_logits, inps, inplens,
+                     cont_toks_list):
+                CFG = float(os.environ['CFG'])
 
                 # Slice to original seq length
                 contlen = len(cont_toks)
-                logits = logits[inplen - contlen : inplen].unsqueeze(
-                    0
-                )  # [1, seq, vocab]
+                logits = logits[inplen - contlen:inplen].unsqueeze(
+                    0)  # [1, seq, vocab]
+                uncond_logits = uncond_logits[:contlen].unsqueeze(0)
+
+                logits = logits * CFG + uncond_logits * (1 - CFG)
 
                 # Check if per-token argmax is exactly equal to continuation
                 greedy_tokens = logits.argmax(dim=-1)
-                cont_toks = torch.tensor(cont_toks, dtype=torch.long).unsqueeze(
-                    0
-                )  # [1, seq]
+                cont_toks = torch.tensor(
+                    cont_toks, dtype=torch.long).unsqueeze(0)  # [1, seq]
                 max_equal = (greedy_tokens == cont_toks).all()
 
                 # Obtain log-probs at the corresponding continuation token indices
                 # last_token_slice = logits[:, -1, :].squeeze(0).tolist()
-                logits = torch.gather(logits, 2, cont_toks.unsqueeze(-1)).squeeze(
-                    -1
-                )  # [1, seq]
+                logits = torch.gather(
+                    logits, 2, cont_toks.unsqueeze(-1)).squeeze(-1)  # [1, seq]
 
                 # Answer: (log prob, is-exact-match)
                 answer = (float(logits.sum()), bool(max_equal))
 
                 # partial caching
                 if cache_key is not None:
-                    self.cache_hook.add_partial("loglikelihood", cache_key, answer)
+                    self.cache_hook.add_partial("loglikelihood", cache_key,
+                                                answer)
 
                 res.append(answer)
 
@@ -397,22 +438,22 @@ class BaseLM(LM):
                 until = [until]
 
             if until:
-                (primary_until,) = self.tok_encode(until[0])
+                (primary_until, ) = self.tok_encode(until[0])
             else:
                 primary_until = None
 
-            context_enc = torch.tensor(
-                [self.tok_encode(context)[self.max_gen_toks - self.max_length :]]
-            ).to(self.device)
+            context_enc = torch.tensor([
+                self.tok_encode(context)[self.max_gen_toks - self.max_length:]
+            ]).to(self.device)
 
             max_gen_tokens = min(
-                self.max_gen_toks, request_args.get("max_length", self.max_gen_toks)
-            )
-            cont = self._model_generate(
-                context_enc, context_enc.shape[1] + max_gen_tokens, primary_until
-            )
+                self.max_gen_toks,
+                request_args.get("max_length", self.max_gen_toks))
+            cont = self._model_generate(context_enc,
+                                        context_enc.shape[1] + max_gen_tokens,
+                                        primary_until)
 
-            s = self.tok_decode(cont[0].tolist()[context_enc.shape[1] :])
+            s = self.tok_decode(cont[0].tolist()[context_enc.shape[1]:])
 
             for term in until:
                 s = s.split(term)[0]
@@ -629,9 +670,12 @@ class Task(abc.ABC):
         return ""
 
     @utils.positional_deprecated
-    def fewshot_context(
-        self, doc, num_fewshot, provide_description=None, rnd=None, description=None
-    ):
+    def fewshot_context(self,
+                        doc,
+                        num_fewshot,
+                        provide_description=None,
+                        rnd=None,
+                        description=None):
         """Returns a fewshot context string that is made up of a prepended description
         (if provided), the `num_fewshot` number of examples, and an appended prompt example.
 
@@ -655,8 +699,7 @@ class Task(abc.ABC):
         assert not provide_description, (
             "The `provide_description` arg will be removed in future versions. To prepend "
             "a custom description to the context, supply the corresponding string via the "
-            "`description` arg."
-        )
+            "`description` arg.")
         if provide_description is not None:
             # nudge people to not specify it at all
             print(
@@ -673,38 +716,32 @@ class Task(abc.ABC):
                 fewshotex = self.fewshot_examples(k=num_fewshot, rnd=rnd)
             else:
                 if self._fewshot_docs is None:
-                    self._fewshot_docs = list(
-                        self.validation_docs()
-                        if self.has_validation_docs()
-                        else self.test_docs()
-                    )
+                    self._fewshot_docs = list(self.validation_docs(
+                    ) if self.has_validation_docs() else self.test_docs())
 
                 fewshotex = rnd.sample(self._fewshot_docs, num_fewshot + 1)
 
                 # get rid of the doc that's the one we're evaluating, if it's in the fewshot
                 fewshotex = [x for x in fewshotex if x != doc][:num_fewshot]
 
-            labeled_examples = (
-                "\n\n".join(
-                    [
-                        self.doc_to_text(doc) + self.doc_to_target(doc)
-                        for doc in fewshotex
-                    ]
-                )
-                + "\n\n"
-            )
+            labeled_examples = ("\n\n".join([
+                self.doc_to_text(doc) + self.doc_to_target(doc)
+                for doc in fewshotex
+            ]) + "\n\n")
 
         example = self.doc_to_text(doc)
         return description + labeled_examples + example
 
 
 class MultipleChoiceTask(Task):
+
     def doc_to_target(self, doc):
         return " " + doc["choices"][doc["gold"]]
 
     def construct_requests(self, doc, ctx):
         lls = [
-            rf.loglikelihood(ctx, " {}".format(choice))[0] for choice in doc["choices"]
+            rf.loglikelihood(ctx, " {}".format(choice))[0]
+            for choice in doc["choices"]
         ]
 
         return lls
@@ -735,6 +772,7 @@ class MultipleChoiceTask(Task):
 
 
 class PerplexityTask(Task, abc.ABC):
+
     def should_decontaminate(self):
         """Whether this task supports decontamination against model training set."""
         return True
@@ -746,9 +784,12 @@ class PerplexityTask(Task, abc.ABC):
         assert k == 0
         return []
 
-    def fewshot_context(
-        self, doc, num_fewshot, provide_description=None, rnd=None, description=None
-    ):
+    def fewshot_context(self,
+                        doc,
+                        num_fewshot,
+                        provide_description=None,
+                        rnd=None,
+                        description=None):
         assert (
             num_fewshot == 0
         ), "The number of fewshot examples must be 0 for perplexity tasks."
@@ -758,8 +799,7 @@ class PerplexityTask(Task, abc.ABC):
         assert not provide_description, (
             "The `provide_description` arg will be removed in future versions. To prepend "
             "a custom description to the context, supply the corresponding string via the "
-            "`description` arg."
-        )
+            "`description` arg.")
         if provide_description is not None:
             # nudge people to not specify it at all
             print(
@@ -790,7 +830,7 @@ class PerplexityTask(Task, abc.ABC):
         return req
 
     def process_results(self, doc, results):
-        (loglikelihood,) = results
+        (loglikelihood, ) = results
         words = self.count_words(doc)
         bytes_ = self.count_bytes(doc)
         return {
@@ -822,6 +862,7 @@ def hash_args(attr, args):
 
 
 class CacheHook:
+
     def __init__(self, cachinglm):
         if cachinglm is None:
             self.dbdict = None
@@ -837,6 +878,7 @@ class CacheHook:
 
 
 class CachingLM:
+
     def __init__(self, lm, cache_db):
         """LM wrapper that returns cached results if they exist, and uses the underlying LM if not.
 
@@ -855,6 +897,7 @@ class CachingLM:
         lm.set_cache_hook(self.get_cache_hook())
 
     def __getattr__(self, attr):
+
         def fn(requests):
             res = []
             remaining_reqs = []
@@ -904,11 +947,11 @@ REQUEST_RETURN_LENGTHS = {
 
 
 class Request:
+
     def __init__(self, request_type, args, index=None):
         if request_type not in REQUEST_RETURN_LENGTHS.keys():
             raise NotImplementedError(
-                "The request type {} is not implemented!".format(request_type)
-            )
+                "The request type {} is not implemented!".format(request_type))
 
         self.request_type = request_type
         self.args = args
@@ -916,28 +959,29 @@ class Request:
 
     def __iter__(self):
         if REQUEST_RETURN_LENGTHS[self.request_type] is None:
-            raise IndexError("This request type does not return multiple arguments!")
+            raise IndexError(
+                "This request type does not return multiple arguments!")
         for i in range(REQUEST_RETURN_LENGTHS[self.request_type]):
             yield Request(self.request_type, self.args, i)
 
     def __getitem__(self, i):
         if REQUEST_RETURN_LENGTHS[self.request_type] is None:
-            raise IndexError("This request type does not return multiple arguments!")
+            raise IndexError(
+                "This request type does not return multiple arguments!")
         return Request(self.request_type, self.args, i)
 
     def __eq__(self, other):
-        return (
-            self.request_type == other.request_type
-            and self.args == other.args
-            and self.index == other.index
-        )
+        return (self.request_type == other.request_type
+                and self.args == other.args and self.index == other.index)
 
     def __repr__(self):
         return f"Req_{self.request_type}{self.args}[{self.index}]\n"
 
 
 class RequestFactory:
+
     def __getattr__(self, attr):
+
         def fn(*args):
             return Request(attr, args)
 
