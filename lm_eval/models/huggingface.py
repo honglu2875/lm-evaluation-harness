@@ -3,11 +3,13 @@ import torch
 import torch.nn.functional as F
 import transformers
 import peft
+import os
 from pathlib import Path
 from typing import List, Mapping, NewType, Optional, Tuple, Union
 from tqdm import tqdm
 
 from transformers import BatchEncoding
+from transformers.generation import LogitsWarper, LogitsProcessorList
 from accelerate import find_executable_batch_size
 
 from lm_eval import utils
@@ -55,6 +57,29 @@ def _get_dtype(
     else:
         _torch_dtype = dtype
     return _torch_dtype
+
+
+class CFGLogits(LogitsWarper):
+
+    def __init__(self, cfg, inputs, model):
+        self.cfg = cfg
+        self.inputs = inputs
+        self.model = model
+        self.out = None
+
+    def __call__(self, input_ids, scores):
+        if self.cfg == 1:
+            return F.log_softmax(scores, dim=-1)
+        scores = F.log_softmax(scores, dim=-1)
+        if self.out is None:
+            self.out = self.model(self.inputs, use_cache=True)
+        else:
+            self.out = self.model(input_ids[:, -1:],
+                                  use_cache=True,
+                                  past_key_values=self.out.past_key_values)
+        unconditional_logits = F.log_softmax(self.out.logits[0][-1:], dim=-1)
+        out = self.cfg * (scores - unconditional_logits) + unconditional_logits
+        return out
 
 
 class HuggingFaceAutoLM(BaseLM):
@@ -519,6 +544,7 @@ class AutoCausalLM(HuggingFaceAutoLM):
             self.tokenizer, stop, input_ids.shape[1], input_ids.shape[0]
         )
 
+        cfg = float(os.environ['CFG'])
         generations = self.model.generate(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -527,6 +553,8 @@ class AutoCausalLM(HuggingFaceAutoLM):
             # of new tokens to generate, excluding the current number of tokens.
             max_new_tokens=max_tokens,
             stopping_criteria=stopping_criteria,
+            logits_processor=LogitsProcessorList(
+                [CFGLogits(cfg, input_ids, self.model)]),
             do_sample=False,
         )
         return utils.select_continuation_from_batch_left_padding(
