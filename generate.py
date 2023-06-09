@@ -1,3 +1,4 @@
+
 import sys
 from transformers import (GPT2Tokenizer, AutoModelForCausalLM,
                           GPTNeoXForCausalLM, AutoTokenizer)
@@ -23,6 +24,7 @@ def entropy(logits):
     p = F.softmax(logits, dim=-1)
     return -(p * logits).sum(-1)
 
+device = 'cuda:2'
 
 class CFGLogits(LogitsWarper):
 
@@ -37,7 +39,7 @@ class CFGLogits(LogitsWarper):
             return F.log_softmax(scores, dim=-1)
         scores = F.log_softmax(scores, dim=-1)
         if self.out is None:
-            self.out = self.model(self.inputs, use_cache=True)
+            self.out = self.model(self.inputs.to(device), use_cache=True)
         else:
             self.out = self.model(input_ids[:, -1:],
                                   use_cache=True,
@@ -85,7 +87,7 @@ elif select == 'pythia':
 elif select == 'gpt4all':
     tokenizer = AutoTokenizer.from_pretrained("nomic-ai/gpt4all-j")
     model = AutoModelForCausalLM.from_pretrained("nomic-ai/gpt4all-j",
-                                                 revision="v1.2-jazzy")
+                                                 revision="v1.3-groovy")
     prompt_normal = (
         "### Instruction: The prompt below is a question to answer, "
         "a task to complete, or a conversation to respond to; decide "
@@ -100,9 +102,21 @@ elif select == 'gpt4all':
 
     inputs_normal = tokenizer([prompt_normal], return_tensors="pt")
     inputs_cfg = tokenizer([prompt_cfg], return_tensors="pt")['input_ids']
+elif select == 'gptj':
+    print('load gptj')
+    tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-j-6B")
+    model = AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-j-6B", low_cpu_mem_usage=True, revision='float16')
+    print('loaded')
+
+    prompt = sys.argv[2]
+    inputs_normal = tokenizer([prompt], return_tensors="pt")
+    inputs_cfg = inputs_normal['input_ids'][:, -1:]
 else:
     raise ValueError('unknown model')
 
+
+model.to(device)
+print('to device')
 
 def gen(cfg=1, ngram=0):
     l = 256
@@ -116,7 +130,7 @@ def gen(cfg=1, ngram=0):
         max_new_tokens=l,
         logits_processor=LogitsProcessorList([
             cfgprocessor,
-            MinLengthLogitsProcessor(l, eos_token_id=tokenizer.eos_token_id),
+            #MinLengthLogitsProcessor(l, eos_token_id=tokenizer.eos_token_id),
             TemperatureLogitsWarper(0.8),
             TopPLogitsWarper(0.95),
         ]),
@@ -128,7 +142,7 @@ def gen(cfg=1, ngram=0):
 
 
 gen(1)
+gen(1.25)
 gen(1.5)
-gen(1.2, ngram=1)
-gen(1.2, ngram=2)
-gen(1.2, ngram=3)
+gen(1.75)
+gen(2)
