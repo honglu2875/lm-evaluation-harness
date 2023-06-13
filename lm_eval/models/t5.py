@@ -189,7 +189,6 @@ class T5LM(BaseLM):
             uncond = self._model_call({"input_ids": inputs_tokens["input_ids"][:, -1:], "attention_mask": inputs_tokens["attention_mask"][:, -1:]}, labels=targets_tokens)  # well, I know the tokens are left-padded. But starting with unattended token seems to be even better for our case.
             #print(outputs.logits.shape)
             #print(uncond.logits.shape)
-            exit()
             log_softmaxes = F.log_softmax(outputs.logits * CFG + uncond.logits * (1 - CFG), dim=-1)
 
             output_iterator = zip(
