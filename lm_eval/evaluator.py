@@ -339,7 +339,7 @@ def evaluate(
 
         stderr = lm_eval.metrics.stderr_for_metric(
             metric=task.aggregation()[real_metric],
-            bootstrap_iters=min(bootstrap_iters, 1000)
+            bootstrap_iters=min(bootstrap_iters, 2)
             if metric in ["bleu", "chrf", "ter"]
             else bootstrap_iters,
         )

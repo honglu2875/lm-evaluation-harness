@@ -5,6 +5,7 @@ import numpy as np
 import sacrebleu
 import sklearn.metrics
 import random
+import tqdm
 
 
 def mean(arr):
@@ -199,7 +200,7 @@ class _bootstrap_internal:
         rnd = random.Random()
         rnd.seed(i)
         res = []
-        for _ in range(self.n):
+        for _ in tqdm.tqdm(range(self.n)):
             res.append(self.f(rnd.choices(xs, k=len(xs))))
         return res
 
@@ -207,7 +208,8 @@ class _bootstrap_internal:
 def bootstrap_stderr(f, xs, iters):
     import multiprocessing as mp
 
-    pool = mp.Pool(mp.cpu_count())
+    #pool = mp.Pool(mp.cpu_count())
+    pool = mp.Pool(4)
     # this gives a biased estimate of the stderr (i.e w/ the mean, it gives something
     # equivalent to stderr calculated without Bessel's correction in the stddev.
     # Unfortunately, I haven't been able to figure out what the right correction is
@@ -216,10 +218,9 @@ def bootstrap_stderr(f, xs, iters):
     # Thankfully, shouldn't matter because our samples are pretty big usually anyways
     res = []
     chunk_size = min(1000, iters)
-    from tqdm import tqdm
 
     print("bootstrapping for stddev:", f.__name__)
-    for bootstrap in tqdm(
+    for bootstrap in tqdm.tqdm(
         pool.imap(
             _bootstrap_internal(f, chunk_size),
             [(i, xs) for i in range(iters // chunk_size)],
